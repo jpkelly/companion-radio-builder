@@ -8,6 +8,8 @@ actions stay the same.
 
 Needs Companion 5 (tested with 5.2) and Python 3.
 
+![Radio Builder](docs/screenshot.png)
+
 ## Quick start
 
 1. Install [Python 3](https://www.python.org/downloads/).
