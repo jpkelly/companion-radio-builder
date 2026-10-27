@@ -12,36 +12,35 @@ Needs Companion 5 (tested with 5.2) and Python 3.
 
 ## Quick start
 
-1. Install [Python 3](https://www.python.org/downloads/).
-2. Download this repository (**Code** → **Download ZIP**) and unzip it.
-3. Double-click **Start Radio Builder** (`.command` on Mac, `.bat` on Windows).
-   It opens in your browser.
-4. Enter your Companion's address at the top and click **Connect**.
-
-## macOS
+### macOS
 
 1. Install Python 3 from [python.org](https://www.python.org/downloads/).
-2. Download the ZIP and double-click it to unzip.
+2. Download this repository (**Code** → **Download ZIP**) and double-click the ZIP to unzip it.
 3. Double-click **Start Radio Builder.command**. If macOS blocks it, open
    **System Settings** → **Privacy & Security** and click **Open Anyway**.
+4. In the page that opens, enter your Companion's address and click **Connect**.
 
-## Windows
+### Windows
 
 1. Install Python 3 from [python.org](https://www.python.org/downloads/).
-2. Download the ZIP, right-click it and choose **Extract All**.
+2. Download this repository (**Code** → **Download ZIP**), right-click the ZIP
+   and choose **Extract All**.
 3. Double-click **Start Radio Builder.bat**. If Windows warns about it, choose
    to run it anyway.
+4. In the page that opens, enter your Companion's address and click **Connect**.
 
-## Linux
+### Linux
 
-```sh
-cd ~/Downloads
-unzip companion-radio-builder-main.zip
-cd companion-radio-builder-main
-python3 radio-ui.py --open
-```
+1. Download this repository (**Code** → **Download ZIP**), then run:
+   ```sh
+   cd ~/Downloads
+   unzip companion-radio-builder-main.zip
+   cd companion-radio-builder-main
+   python3 radio-ui.py --open
+   ```
+2. In the page that opens, enter your Companion's address and click **Connect**.
 
-## Companion Pi
+### Companion Pi
 
 This installs the tool on the Pi, ready to start at any time. Log in to the Pi
 (ssh) and run:
