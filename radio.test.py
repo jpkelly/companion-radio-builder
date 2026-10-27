@@ -2,6 +2,8 @@
 """Offline tests for radio.py. Run: python3 -I radio.test.py"""
 import contextlib
 import copy
+import gzip
+import http.server
 import importlib.util
 import io
 import json
@@ -18,6 +20,7 @@ spec = importlib.util.spec_from_file_location("radio", ROOT / "radio.py")
 radio = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(radio)
 rp = radio.rp
+REAL_FETCH_PAGE = radio.fetch_page  # WorkflowTests replace it with a fake
 
 FIXTURE = ROOT / "fixtures" / "page16.json"
 
@@ -141,6 +144,46 @@ def regenerate_ids(o):
     return o
 
 
+class VersionTests(unittest.TestCase):
+    def test_tested_version_passes_others_warn_and_older_than_5_is_refused(self):
+        self.assertIsNone(radio.check_version({"companionBuild": "5.2.0+10027-main-eee648c42b"}))
+        self.assertIsNone(radio.check_version({"companionBuild": "5.2.3"}))
+        self.assertIn("5.1.0", radio.check_version({"companionBuild": "5.1.0+1"}))
+        self.assertIn("6.0.0", radio.check_version({"companionBuild": "6.0.0"}))
+        self.assertIn("Could not tell", radio.check_version({}))
+        with self.assertRaisesRegex(radio.RadioError, "needs Companion 5"):
+            radio.check_version({"companionBuild": "4.1.2+3"})
+
+    def test_fetch_page_refuses_old_companions_and_other_web_servers(self):
+        answer = {}
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(answer["body"])))
+                self.end_headers()
+                self.wfile.write(answer["body"])
+
+            def log_message(self, *args):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        host = f"127.0.0.1:{srv.server_address[1]}"
+        try:
+            answer["body"] = json.dumps({"type": "page", "companionBuild": "4.1.0", "page": {}}).encode()
+            with self.assertRaisesRegex(radio.RadioError, "needs Companion 5"):
+                REAL_FETCH_PAGE(host, 1)
+            answer["body"] = b"<html>router login</html>"
+            with self.assertRaisesRegex(radio.RadioError, "did not answer like Companion"):
+                REAL_FETCH_PAGE(host, 1)
+            answer["body"] = gzip.compress(FIXTURE.read_bytes())
+            self.assertEqual(REAL_FETCH_PAGE(host, 16)["page"]["name"], "BG RAD")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+
 class Fake:
     """Stands in for a live Companion: fetch_page / import_page act on one page."""
 
@@ -201,6 +244,17 @@ class WorkflowTests(unittest.TestCase):
         code, out, _ = self.run_cmd("strip", "19", "--yes")
         self.assertEqual(code, 0, out)
         self.assertTrue(rp.same_ignoring_ids(self.fake.state, self.original))
+
+    def test_old_companion_is_refused_and_untested_versions_warn(self):
+        self.fake.state["companionBuild"] = "4.1.0"
+        code, _, err = self.run_cmd("list", "19")
+        self.assertEqual(code, 2)
+        self.assertIn("needs Companion 5", err)
+        self.assertEqual(self.fake.imports, [])
+        self.fake.state["companionBuild"] = "5.1.0"
+        code, out, err = self.run_cmd("apply", "19", "-g", "A=0:1", "--yes")
+        self.assertEqual(code, 0, out)
+        self.assertIn("warning: This is Companion 5.1.0", err)
 
     def test_dry_run_imports_nothing(self):
         code, out, _ = self.run_cmd("apply", "19", "-g", "A=0:1", "--dry-run")

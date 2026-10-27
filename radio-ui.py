@@ -1,15 +1,18 @@
 #!/usr/bin/python3 -I
 """Radio Builder - a small web UI for putting buttons into radio groups.
 
-Open it from a browser (default http://<this pi>:8088). Pick a page, click the
-keys that belong together, give them a group label, review the changes and
-apply. Every change backs the page up first and can be undone.
+Open it from a browser (default port 8088). Pick a page, click the keys that
+belong together, give them a group label, review the changes and apply. Every
+change backs the page up first and can be undone.
 
-Run by hand:   python3 -I radio-ui.py [--port 8088] [--idle-minutes 30]
+Run by hand:   python3 -I radio-ui.py [--open] [--companion host:port] [--port 8088] [--idle-minutes 30]
+Without --companion the Companion address is typed on the page and remembered
+(settings.json next to the backups); with it the address is fixed.
 It stops itself after --idle-minutes without a request. Pages listed in
 RADIO_BLOCKED_PAGES (default: 99) can be viewed but never changed.
 """
 import argparse
+import errno
 import importlib.util
 import json
 import re
@@ -18,6 +21,7 @@ import threading
 import time
 import traceback
 import urllib.request
+import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,7 +34,45 @@ _spec.loader.exec_module(radio)
 rp = radio.rp
 
 KEY_RE = re.compile(r"^(\d+):(\d+)$")
+ADDRESS_RE = re.compile(r"^([A-Za-z0-9.-]+)(?::(\d{1,5}))?$")
+DEFAULT_COMPANION = "127.0.0.1:8000"
 MAX_BODY = 1 << 20
+
+
+def normalise_address(text):
+    """'host', 'host:port' or a pasted URL -> 'host:port' (Companion's default port 8000), or None."""
+    text = re.sub(r"^https?://", "", str(text or "").strip()).split("/")[0]
+    m = ADDRESS_RE.match(text)
+    if not m or (m.group(2) and not 0 < int(m.group(2)) < 65536):
+        return None
+    return f"{m.group(1)}:{m.group(2) or 8000}"
+
+
+def settings_file():
+    return radio.backup_dir() / "settings.json"
+
+
+def load_settings():
+    try:
+        d = json.loads(settings_file().read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(d):
+    try:
+        settings_file().parent.mkdir(parents=True, exist_ok=True)
+        settings_file().write_text(json.dumps(d))
+    except OSError:
+        pass  # not fatal: the address still holds until the tool stops
+
+
+def startup_companion(arg):
+    """(address, locked) for --companion `arg`: fixed if given, else the remembered address or the default."""
+    if arg is not None:
+        return normalise_address(arg), True
+    return normalise_address(load_settings().get("companion")) or DEFAULT_COMPANION, False
 
 
 def label_of(button):
@@ -53,6 +95,7 @@ def fetch_text(companion, page, row, col):
 
 def page_view(companion, page):
     d = radio.fetch_page(companion, page)
+    warning = radio.check_version(d)
     p = d["page"]
     grid = p["gridSize"]
     groups = {key: label for label, keys in rp.list_radio(d).items() for key in keys}
@@ -87,6 +130,7 @@ def page_view(companion, page):
         "cells": cells,
         "backups": len(radio.list_backups(page)),
         "blocked": page in radio.blocked_pages(),
+        "warning": warning,
     }
 
 
@@ -118,10 +162,12 @@ def parse_assignments(raw):
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
+    allow_reuse_address = not sys.platform.startswith("win")  # on Windows it lets a second copy share the port
 
-    def __init__(self, addr, companion, idle_seconds):
+    def __init__(self, addr, companion, idle_seconds, locked=False):
         super().__init__(addr, Handler)
         self.companion = companion
+        self.locked = locked  # address given at start: the page may not change it
         self.idle_seconds = idle_seconds
         self.last_activity = time.time()
         self.op_lock = threading.Lock()
@@ -151,7 +197,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             return self._send(200, PAGE_HTML.encode(), "text/html")
         if path == "/api/status":
-            return self._send(200, {"ok": True, "blocked": radio.blocked_pages(), "idle_seconds": self.server.idle_seconds})
+            return self._send(200, {"ok": True, "blocked": radio.blocked_pages(), "idle_seconds": self.server.idle_seconds,
+                                    "companion": self.server.companion, "locked": self.server.locked})
         m = re.match(r"^/api/page/(\d+)$", path)
         if m:
             try:
@@ -182,6 +229,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"ok": True, "message": "Stopping."})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
+        if path == "/api/companion":
+            return self._set_companion(body.get("address"))
         if path not in ("/api/sync", "/api/restore"):
             return self._fail(404, "not found")
         if not self.server.op_lock.acquire(blocking=False):
@@ -205,6 +254,23 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             self.server.op_lock.release()
 
+    def _set_companion(self, address):
+        if self.server.locked:
+            return self._fail(400, "the Companion address was set when Radio Builder was started")
+        address = normalise_address(address)
+        if address is None:
+            return self._fail(400, "enter Companion's address, e.g. 192.168.1.20 or 192.168.1.20:8000")
+        try:
+            warning = radio.check_version(radio.fetch_page(address, 1))
+        except radio.RadioError as e:
+            return self._fail(400, str(e))
+        except Exception:
+            traceback.print_exc()
+            return self._fail(500, "unexpected error; see the service log")
+        self.server.companion = address
+        save_settings({**load_settings(), "companion": address})
+        return self._send(200, {"ok": True, "companion": address, "warning": warning})
+
 
 def watch_idle(srv, check_every=5):
     while True:
@@ -219,13 +285,29 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8088)
     ap.add_argument("--bind", default="0.0.0.0")
-    ap.add_argument("--companion", default="127.0.0.1:8000", help="Companion host:port")
+    ap.add_argument("--companion", help="Companion host:port, fixed (default: the last address used on the page)")
     ap.add_argument("--idle-minutes", type=float, default=30)
+    ap.add_argument("--open", action="store_true", help="open the page in a browser")
     a = ap.parse_args(argv)
-    srv = Server((a.bind, a.port), a.companion, a.idle_minutes * 60)
+    companion, locked = startup_companion(a.companion)
+    if companion is None:
+        ap.error("--companion must be host or host:port")
+    url = f"http://localhost:{a.port}/"
+    try:
+        srv = Server((a.bind, a.port), companion, a.idle_minutes * 60, locked)
+    except OSError as e:
+        if e.errno not in (errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", None)):
+            raise
+        print(f"Port {a.port} is already in use: Radio Builder may already be running at {url}", file=sys.stderr)
+        if a.open:
+            webbrowser.open(url)
+            return 0
+        return 1
     threading.Thread(target=watch_idle, args=(srv,), daemon=True).start()
-    print(f"Radio Builder on port {srv.server_address[1]}, Companion at {a.companion}, "
+    print(f"Radio Builder at {url} (port {srv.server_address[1]}), Companion at {companion}, "
           f"stops after {a.idle_minutes:g} idle minutes, protected pages: {radio.blocked_pages()}", file=sys.stderr, flush=True)
+    if a.open:
+        webbrowser.open(url)
     try:
         srv.serve_forever()
     finally:
@@ -242,7 +324,7 @@ PAGE_HTML = r"""<!doctype html>
  h1{margin:0 0 4px;font-size:22px} .sub{color:#9aa3ad;margin:0 0 16px}
  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}
  input{background:#1e232b;color:inherit;border:1px solid #3a424d;border-radius:6px;padding:7px 9px;font:inherit}
- #page{width:70px} #label{width:120px}
+ #page{width:70px} #label{width:120px} #companion{width:190px}
  button{background:#2a313b;color:inherit;border:1px solid #46505d;border-radius:6px;padding:8px 12px;font:inherit;cursor:pointer}
  button:hover{background:#343c48} button.primary{background:#1f6f43;border-color:#2a9a5d}
  button:disabled{opacity:.4;cursor:not-allowed}
@@ -267,6 +349,7 @@ PAGE_HTML = r"""<!doctype html>
 </style></head><body>
 <h1>Radio Builder</h1>
 <p class="sub">Keys in the same group behave like radio buttons: pressing one highlights it and clears the others in its group.</p>
+<div class="bar">Companion <input id="companion" placeholder="192.168.1.20:8000"> <button id="connect">Connect</button></div>
 <div class="bar">Page <input id="page" type="number" min="1" max="99" value="1"> <button id="load">Load</button> <strong id="pname"></strong></div>
 <div id="warn" class="warn" hidden></div>
 <div id="grid"></div>
@@ -377,15 +460,36 @@ async function load() {
   if (!(n >= 1)) { say("Enter a page number.", true); return; }
   try {
     view = await api("/api/page/" + n);
-  } catch (e) { say(e.message, true); return; }
+  } catch (e) { say(e.message + " (check the Companion address at the top)", true); return; }
   localStorage.setItem("radioPage", String(n));
   cur = {}; sel.clear();
   for (const c of view.cells) if (c.group) cur[c.row + ":" + c.col] = {g: c.group, s: c.style};
   $("pname").textContent = "“" + view.name + "”";
-  const w = $("warn"); w.hidden = !view.blocked;
-  w.textContent = view.blocked ? "Page " + view.page + " is protected: you can look at it but it cannot be changed here." : "";
+  const notes = [];
+  if (view.blocked) notes.push("Page " + view.page + " is protected: you can look at it but it cannot be changed here.");
+  if (view.warning) notes.push(view.warning);
+  const w = $("warn"); w.hidden = !notes.length; w.textContent = notes.join(" ");
   $("plan").hidden = true; render();
 }
+
+async function status() {
+  try {
+    const s = await api("/api/status");
+    $("companion").value = s.companion;
+    $("companion").disabled = $("connect").disabled = s.locked;
+    if (s.locked) $("companion").title = "Set when Radio Builder was started";
+  } catch (e) { say(e.message, true); }
+}
+$("connect").onclick = async () => {
+  say("Connecting…", false);
+  try {
+    const r = await api("/api/companion", {address: $("companion").value});
+    $("companion").value = r.companion;
+    say("Connected to Companion at " + r.companion + ".", false);
+    await load();
+  } catch (e) { say(e.message, true); }
+};
+$("companion").onkeydown = e => { if (e.key === "Enter") $("connect").click(); };
 
 $("load").onclick = load;
 $("page").onkeydown = e => { if (e.key === "Enter") load(); };
@@ -434,13 +538,13 @@ $("undo").onclick = async () => {
   await load();
 };
 $("stop").onclick = async () => {
-  if (!confirm("Stop Radio Builder? Press the key on the utility page to start it again.")) return;
+  if (!confirm("Stop Radio Builder?")) return;
   try { await api("/api/stop", {}); say("Stopped.", false); } catch (e) { say(e.message, true); }
 };
 
 $("page").value = localStorage.getItem("radioPage") || "1";
 showColours();
-load();
+status().then(load);
 </script></body></html>
 """
 

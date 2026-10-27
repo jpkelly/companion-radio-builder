@@ -1,0 +1,2 @@
+# keep Windows line endings in the launcher
+*.bat -text

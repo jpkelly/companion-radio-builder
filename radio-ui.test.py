@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Offline tests for radio-ui.py. Run: python3 -I radio-ui.test.py"""
+import contextlib
 import copy
 import http.client
 import importlib.util
+import io
 import json
 import os
 import re
@@ -81,6 +83,79 @@ class UiTests(unittest.TestCase):
     def post(self, path, body, **kw):
         status, raw = self.req("POST", path, body, kw.get("headers"))
         return status, json.loads(raw)
+
+    # ---------------------------------------------------------------- Companion address and version
+
+    def test_companion_addresses_are_normalised(self):
+        cases = {"192.168.1.20": "192.168.1.20:8000", " companion.local:8001 ": "companion.local:8001",
+                 "http://10.0.0.5:8000/buttons": "10.0.0.5:8000"}
+        for text, want in cases.items():
+            self.assertEqual(ui.normalise_address(text), want, text)
+        for text in ("", None, "a b", "host:0", "host:70000", "host:port"):
+            self.assertIsNone(ui.normalise_address(text), text)
+
+    def test_connect_checks_companion_then_uses_and_remembers_the_address(self):
+        self.pages[1] = copy.deepcopy(self.original)
+        status, r = self.post("/api/companion", {"address": "10.0.0.5"})
+        self.assertEqual((status, r["companion"], r["warning"]), (200, "10.0.0.5:8000", None))
+        status, raw = self.req("GET", "/api/status")
+        self.assertEqual(json.loads(raw)["companion"], "10.0.0.5:8000")
+        self.assertEqual(ui.startup_companion(None), ("10.0.0.5:8000", False))
+
+    def test_connect_refuses_bad_or_unreachable_addresses_and_keeps_the_old_one(self):
+        status, r = self.post("/api/companion", {"address": "not an address"})
+        self.assertEqual(status, 400)
+
+        def unreachable(host, n):
+            raise radio.RadioError(f"cannot read page {n} from {host}: refused")
+
+        radio.fetch_page = unreachable
+        status, r = self.post("/api/companion", {"address": "10.9.9.9"})
+        self.assertEqual(status, 400)
+        self.assertIn("cannot read page 1 from 10.9.9.9:8000", r["error"])
+        self.assertEqual(self.srv.companion, "fake:1")
+        self.assertEqual(ui.startup_companion(None), (ui.DEFAULT_COMPANION, False))
+
+    def test_an_address_given_at_start_is_fixed(self):
+        self.assertEqual(ui.startup_companion("10.0.0.7"), ("10.0.0.7:8000", True))
+        self.srv.locked = True
+        self.pages[1] = copy.deepcopy(self.original)
+        status, r = self.post("/api/companion", {"address": "10.0.0.5"})
+        self.assertEqual(status, 400)
+        self.assertEqual(self.srv.companion, "fake:1")
+        status, raw = self.req("GET", "/api/status")
+        self.assertTrue(json.loads(raw)["locked"])
+
+    def test_companion_older_than_5_is_refused_and_untested_versions_warn(self):
+        self.pages[19]["companionBuild"] = "4.1.0+123"
+        status, raw = self.req("GET", "/api/page/19")
+        self.assertEqual(status, 400)
+        self.assertIn(b"needs Companion 5", raw)
+        for build, warns in (("5.1.3+9", True), ("6.0.0", True), ("5.2.0+1", False)):
+            self.pages[19]["companionBuild"] = build
+            status, raw = self.req("GET", "/api/page/19")
+            self.assertEqual(status, 200, build)
+            self.assertEqual(bool(json.loads(raw)["warning"]), warns, build)
+
+    def test_page_has_the_companion_field_and_connects_from_it(self):
+        status, raw = self.req("GET", "/")
+        page = raw.decode()
+        self.assertIn('id="companion"', page)
+        self.assertIn('api("/api/companion"', page)
+        self.assertIn("status().then(load)", page)
+
+    def test_start_on_a_busy_port_says_so_and_can_open_the_running_copy(self):
+        opened, real_open = [], ui.webbrowser.open
+        ui.webbrowser.open = opened.append
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                self.assertEqual(ui.main(["--bind", "127.0.0.1", "--port", str(self.port)]), 1)
+                self.assertEqual(ui.main(["--bind", "127.0.0.1", "--port", str(self.port), "--open"]), 0)
+        finally:
+            ui.webbrowser.open = real_open
+        self.assertIn("already in use", err.getvalue())
+        self.assertEqual(opened, [f"http://localhost:{self.port}/"])
 
     # ---------------------------------------------------------------- read side
 

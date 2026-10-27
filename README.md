@@ -6,38 +6,29 @@ and it lights up, and the others go back to normal.
 It works on buttons you have already made. It changes only how they look: their
 actions stay the same.
 
+Needs Companion 5 (tested with 5.2) and Python 3.
+
 ## Quick start
 
 1. Install [Python 3](https://www.python.org/downloads/).
 2. Download this repository (**Code** → **Download ZIP**) and unzip it.
-3. In that folder, run `python3 radio-ui.py --companion <companion-ip>:8000`.
-4. Open <http://localhost:8088>.
-
-If Companion runs on the same computer, leave out `--companion ...`. Press
-Ctrl+C to stop.
+3. Double-click **Start Radio Builder** (`.command` on Mac, `.bat` on Windows).
+   It opens in your browser.
+4. Enter your Companion's address at the top and click **Connect**.
 
 ## macOS
 
 1. Install Python 3 from [python.org](https://www.python.org/downloads/).
 2. Download the ZIP and double-click it to unzip.
-3. Open Terminal and run:
-   ```sh
-   cd ~/Downloads/companion-radio-builder-main
-   python3 radio-ui.py --companion <companion-ip>:8000
-   ```
-4. Open <http://localhost:8088>.
+3. Double-click **Start Radio Builder.command**. If macOS blocks it, open
+   **System Settings** → **Privacy & Security** and click **Open Anyway**.
 
 ## Windows
 
 1. Install Python 3 from [python.org](https://www.python.org/downloads/).
 2. Download the ZIP, right-click it and choose **Extract All**.
-3. Open the extracted folder that contains `radio-ui.py`, type `cmd` in the
-   address bar and press Enter.
-4. Run:
-   ```bat
-   py radio-ui.py --companion <companion-ip>:8000
-   ```
-5. Open <http://localhost:8088>.
+3. Double-click **Start Radio Builder.bat**. If Windows warns about it, choose
+   to run it anyway.
 
 ## Linux
 
@@ -45,10 +36,8 @@ Ctrl+C to stop.
 cd ~/Downloads
 unzip companion-radio-builder-main.zip
 cd companion-radio-builder-main
-python3 radio-ui.py --companion <companion-ip>:8000
+python3 radio-ui.py --open
 ```
-
-Open <http://localhost:8088>.
 
 ## Companion Pi
 
@@ -72,4 +61,5 @@ start it again, run `sudo systemctl start radio-ui`.
 3. Pick the colours, click **Review changes**, then apply.
 
 **Undo last change** puts the page back. Applying replaces the page in
-Companion, so don't do it during a show.
+Companion, so don't do it during a show. To stop the tool, click **Stop this
+tool**.

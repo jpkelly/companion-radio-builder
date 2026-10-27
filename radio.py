@@ -155,15 +155,45 @@ class Trpc:
 
 # ---------------------------------------------------------------- Companion access
 
+TESTED_VERSION = (5, 2)  # the Companion release this tool is built and tested against
+
+
+def companion_version(export):
+    """(major, minor, patch) of the Companion that made `export`, or None if it does not say."""
+    m = re.match(r"^(\d+)\.(\d+)\.(\d+)", str(export.get("companionBuild") or ""))
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def check_version(export):
+    """Refuse a Companion older than 5 (its pages use another format).
+
+    Returns a warning for any version other than the tested one, else None.
+    """
+    v = companion_version(export)
+    if v is None:
+        return "Could not tell which Companion version this is. Radio Builder needs Companion 5 and is tested with 5.2."
+    shown = ".".join(map(str, v))
+    if v[0] < 5:
+        raise RadioError(f"this is Companion {shown}; Radio Builder needs Companion 5 or newer")
+    if v[:2] != TESTED_VERSION:
+        return f"This is Companion {shown}; Radio Builder is tested with 5.2. Check the keys after your first change."
+    return None
+
+
 def fetch_page(hostport, page):
     try:
         with urllib.request.urlopen(f"http://{hostport}/int/export/page/{page}", timeout=20) as r:
             raw = r.read()
     except OSError as e:
         raise RadioError(f"cannot read page {page} from {hostport}: {e}")
-    if raw[:2] == b"\x1f\x8b":
-        raw = gzip.decompress(raw)
-    return json.loads(raw)
+    try:
+        if raw[:2] == b"\x1f\x8b":
+            raw = gzip.decompress(raw)
+        d = json.loads(raw)
+    except (OSError, ValueError):
+        raise RadioError(f"{hostport} did not answer like Companion; check the address and port")
+    check_version(d)
+    return d
 
 
 def import_page(hostport, page_export, target, remap):
@@ -378,8 +408,15 @@ def report(ok, backup, page, details):
     return 1
 
 
+def note_version(d):
+    warning = check_version(d)
+    if warning:
+        print(f"warning: {warning}", file=sys.stderr)
+
+
 def cmd_list(a):
     d = fetch_page(a.host, a.page)
+    note_version(d)
     groups = rp.list_radio(d)
     print(f"page {a.page} {d['page']['name']!r}: radio groups -> {rp._fmt(groups)}")
     return 0
@@ -387,6 +424,7 @@ def cmd_list(a):
 
 def cmd_apply(a):
     before = fetch_page(a.host, a.page)
+    note_version(before)
     groups = dict(rp.parse_group_spec(s) for s in a.group)
     new = rp.apply_radio(before, groups, rp.style_from_args(a))
     done = replace_page(a.host, a.page, before, new, f"adding radio groups: {rp._fmt(groups)}", a)
@@ -402,6 +440,7 @@ def cmd_apply(a):
 
 def cmd_strip(a):
     before = fetch_page(a.host, a.page)
+    note_version(before)
     new, n = rp.strip_radio(before, rp.parse_keys(a.keys) if a.keys else None)
     if n == 0:
         print("no radio parts found on that page; nothing to do")
@@ -417,6 +456,7 @@ def cmd_strip(a):
 def cmd_load(a):
     new = rp.load_page(a.file)
     before = fetch_page(a.host, a.page)
+    note_version(before)
     done = replace_page(a.host, a.page, before, new, f"loading {a.file}", a)
     if done is None:
         return 0
