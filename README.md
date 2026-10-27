@@ -3,6 +3,9 @@
 Make Bitfocus Companion keys work like radio buttons: press one key in a group
 and it lights up, and the others go back to normal.
 
+It works on buttons you have already made. It changes only how they look: their
+actions stay the same.
+
 ## Quick start
 
 1. Install [Python 3](https://www.python.org/downloads/).
