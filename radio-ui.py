@@ -342,7 +342,7 @@ PAGE_HTML = r"""<!doctype html>
  .lrow strong{width:105px} select{background:#1e232b;color:inherit;border:1px solid #3a424d;border-radius:6px;padding:6px 8px;font:inherit}
  input[type=color]{padding:0;width:38px;height:30px}
  .cell.dirty .loc::after{content:" *";color:#f0c040}
- #legend span{display:inline-block;margin:0 8px 6px 0;padding:2px 9px;border-radius:5px;font-size:13px}
+ #legend button{margin:0 8px 6px 0;padding:2px 9px;border:0;border-radius:5px;font-size:13px} #legend button:hover{filter:brightness(1.3)}
  #plan{background:#1e232b;border:1px solid #3a424d;border-radius:8px;padding:12px;margin:12px 0}
  .warn{background:#4a3410;border:1px solid #b9872a;border-radius:8px;padding:10px;margin:10px 0}
  .good{color:#6fd49a} .bad{color:#ff8a80} #msg{min-height:22px;margin-top:8px}
@@ -354,9 +354,8 @@ PAGE_HTML = r"""<!doctype html>
 <div id="warn" class="warn" hidden></div>
 <div id="grid"></div>
 <div id="legend"></div>
-<div class="bar">1. Click keys to select them &nbsp; 2. Group label <input id="label" maxlength="20" placeholder="A">
- <button id="assign">Put selected keys in this group</button> <button id="clear">Take selected keys out of their group</button> <button id="none">Deselect all</button></div>
-<fieldset id="look"><legend>Look given to the keys you put in the group (leave a field on “Keep” to use the button’s own)</legend>
+<div class="bar">1. Click keys to select them <button id="none">Deselect all</button></div>
+<fieldset id="look"><legend>2. Choose their look (leave a field on “Keep” to use the button’s own)</legend>
  <div class="lrow"><strong>Selected</strong>
   Background <select id="on_bg_m"><option value="keep">Keep</option><option value="color">Colour…</option></select><input id="on_bg_c" type="color" value="#1f8f4a">
   Text <select id="on_text_m"><option value="keep">Keep</option><option value="auto">Auto (readable)</option><option value="color">Colour…</option></select><input id="on_text_c" type="color" value="#ffffff">
@@ -365,7 +364,10 @@ PAGE_HTML = r"""<!doctype html>
   Background <select id="off_bg_m"><option value="keep">Keep</option><option value="color">Colour…</option></select><input id="off_bg_c" type="color" value="#202020">
   Text <select id="off_text_m"><option value="keep">Keep</option><option value="auto">Auto (readable)</option><option value="color">Colour…</option></select><input id="off_text_c" type="color" value="#ffffff"></div>
 </fieldset>
-<div class="bar">3. <button id="review" class="primary">Review changes</button> <button id="undo">Undo last change</button> <button id="stop">Stop this tool</button></div>
+<div class="bar">3. Group label <input id="label" maxlength="20" placeholder="A">
+ <button id="assign">Put selected keys in this group</button> <button id="clear">Take selected keys out of their group</button></div>
+<p class="sub">To change a group’s look, click its name below the grid and choose the new look.</p>
+<div class="bar">4. <button id="review" class="primary">Review changes</button> <button id="undo">Undo last change</button> <button id="stop">Stop this tool</button></div>
 <div id="plan" hidden></div>
 <div id="msg"></div>
 <script>
@@ -389,8 +391,36 @@ function readStyle() {
   return {on: {bg: fieldValue("on_bg"), text: fieldValue("on_text"), border: fieldValue("on_border")},
           off: {bg: fieldValue("off_bg"), text: fieldValue("off_text")}};
 }
+function writeStyle(s) {
+  const v = {on_bg: s.on.bg, on_text: s.on.text, on_border: s.on.border, off_bg: s.off.bg, off_text: s.off.text};
+  for (const f of FIELDS) {
+    $(f + "_m").value = v[f] === "auto" ? "auto" : v[f] ? "color" : (f === "on_border" ? "none" : "keep");
+    if (v[f] && v[f] !== "auto") $(f + "_c").value = v[f];
+  }
+  showColours();
+}
 function showColours() { for (const f of FIELDS) $(f + "_c").hidden = $(f + "_m").value !== "color"; }
-for (const f of FIELDS) $(f + "_m").onchange = showColours;
+// a look change applies at once to selected keys already in a group
+function lookChanged() {
+  showColours();
+  if (!sel.size) { say("No keys selected: this look will be used for the next keys you put in a group. To restyle a group, click its name below the grid.", false); return; }
+  const keys = [...sel].filter(k => cur[k]);
+  if (!keys.length) return;
+  const style = readStyle();
+  if (!style.on.bg && !style.on.text && !style.on.border) { say("Choose at least one change for the selected look (background, text or border).", true); return; }
+  for (const k of keys) cur[k].s = style;
+  say("", false); render();
+}
+for (const f of FIELDS) { $(f + "_m").onchange = lookChanged; $(f + "_c").oninput = lookChanged; }
+function selectGroup(l) {
+  sel.clear();
+  for (const [k, v] of Object.entries(cur)) if (v.g === l) sel.add(k);
+  $("label").value = l;
+  const s = cur[[...sel][0]].s;
+  if (s) writeStyle(s);
+  say("Group " + l + " selected: change the look to restyle it, then click Review changes.", false);
+  render();
+}
 const norm = s => s ? JSON.stringify([s.on.bg, s.on.text, s.on.border, s.off.bg, s.off.text].map(v => v && v.toLowerCase())) : "";
 function same(a, b) {
   if (!a || !b) return !a && !b;
@@ -447,7 +477,8 @@ function render() {
   const counts = {}; for (const v of Object.values(cur)) counts[v.g] = (counts[v.g] || 0) + 1;
   const lg = $("legend"); lg.replaceChildren();
   for (const l of Object.keys(counts).sort()) {
-    const s = document.createElement("span"); s.textContent = l + ": " + counts[l] + " key" + (counts[l] === 1 ? "" : "s");
+    const s = document.createElement("button"); s.textContent = l + ": " + counts[l] + " key" + (counts[l] === 1 ? "" : "s");
+    s.title = "Select this group to change its look"; s.onclick = () => selectGroup(l);
     s.style.background = "hsl(" + hue(l) + " 55% 30%)"; lg.append(s);
   }
   const locked = view.blocked;

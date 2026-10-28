@@ -58,8 +58,12 @@ start it again, run `sudo systemctl start radio-ui`.
 ## Use
 
 1. Load a page.
-2. Click the keys for a group, type a name, and click **Put selected keys in this group**.
-3. Pick the colours, click **Review changes**, then apply.
+2. Click the keys for a group and pick their colours.
+3. Type a group name and click **Put selected keys in this group**.
+4. Click **Review changes**, then apply.
+
+To change a group's look, click its name below the grid, pick the new colours,
+then review and apply.
 
 **Undo last change** puts the page back. Applying replaces the page in
 Companion, so don't do it during a show. To stop the tool, click **Stop this
