@@ -65,6 +65,16 @@ start it again, run `sudo systemctl start radio-ui`.
 To change a group's look, click its name below the grid, pick the new colours,
 then review and apply.
 
+### Choosing the look
+
+**Selected** is the look of the last key pressed in a group, and **Not
+selected** is the look of the others. **Keep** leaves the button's own colour,
+and **Auto** makes the text black or white, whichever is easier to read.
+
+Click a key that's in a group, or a group's name below the grid, to see its
+colours. Change one and those keys update straight away, marked `*`. Nothing
+changes in Companion until you review and apply.
+
 **Undo last change** puts the page back. Applying replaces the page in
 Companion, so don't do it during a show. To stop the tool, click **Stop this
 tool**.
