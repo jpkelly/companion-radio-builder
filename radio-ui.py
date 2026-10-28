@@ -501,6 +501,7 @@ async function load() {
   if (view.warning) notes.push(view.warning);
   const w = $("warn"); w.hidden = !notes.length; w.textContent = notes.join(" ");
   $("plan").hidden = true; render();
+  return true;
 }
 
 async function status() {
@@ -575,7 +576,7 @@ $("stop").onclick = async () => {
 
 $("page").value = localStorage.getItem("radioPage") || "1";
 showColours();
-status().then(load);
+status().then(load).then(ok => { if (ok) say("Connected to Companion at " + $("companion").value + ".", false); });
 </script></body></html>
 """
 
