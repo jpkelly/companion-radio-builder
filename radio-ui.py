@@ -470,7 +470,11 @@ function render() {
       }
       if (!same(cur[k] || null, orig(k))) d.classList.add("dirty");
       if (sel.has(k)) d.classList.add("sel");
-      d.onclick = () => { sel.has(k) ? sel.delete(k) : sel.add(k); render(); };
+      d.onclick = () => {
+        if (sel.has(k)) sel.delete(k);
+        else { sel.add(k); if (cur[k] && cur[k].s) writeStyle(cur[k].s); }  // show the chosen key's look
+        render();
+      };
     }
     g.append(d);
   }
