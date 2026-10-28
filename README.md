@@ -16,8 +16,8 @@ Needs Companion 5 (tested with 5.2) and Python 3.
 
 1. Install Python 3 from [python.org](https://www.python.org/downloads/).
 2. Download this repository (**Code** → **Download ZIP**) and double-click the ZIP to unzip it.
-3. Double-click **Start Radio Builder.command**. If macOS blocks it, open
-   **System Settings** → **Privacy & Security** and click **Open Anyway**.
+3. Double-click **Start Radio Builder.command**. The first time, macOS blocks
+   it: [here's how to open it](docs/mac-security.md).
 4. In the page that opens, enter your Companion's address and click **Connect**.
 
 ### Windows
